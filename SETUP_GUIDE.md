@@ -1,467 +1,255 @@
-# 📖 Keycloak MFA Setup Guide
+# 📘 Keycloak MFA Setup Guide
 
-A complete, step-by-step guide to set up Keycloak with TOTP and Email OTP authentication on Ubuntu 22.04.
-
----
-
-## Table of Contents
-
-1. [Phase 1 — Install Java & Keycloak](#phase-1--install-java--keycloak)
-2. [Phase 2 — Create Realm, Client & User](#phase-2--create-realm-client--user)
-3. [Phase 3 — Configure SMTP](#phase-3--configure-smtp)
-4. [Phase 4 — Enable TOTP](#phase-4--enable-totp)
-5. [Phase 5 — Deploy Email OTP Plugin](#phase-5--deploy-email-otp-plugin)
-6. [Phase 6 — Configure Authentication Flows](#phase-6--configure-authentication-flows)
-7. [Phase 7 — Demo Application Setup](#phase-7--demo-application-setup)
-8. [Phase 8 — Testing the Complete Flow](#phase-8--testing-the-complete-flow)
-9. [Troubleshooting](#troubleshooting)
-10. [Keycloak Folder Structure](#keycloak-folder-structure)
+> **Target Audience:** Developers & DevOps Engineers setting up Local Keycloak environments.
+> **Objective:** A complete, step-by-step graphical guide to set up Keycloak with TOTP and Email OTP authentication on Ubuntu 22.04.
 
 ---
 
-## Phase 1 — Install Java & Keycloak
+## 🗺️ Roadmap / Table of Contents
+
+| Phase | Description | Goal |
+| :---: | :--- | :--- |
+| **[1](#phase-1--install-java--keycloak)** | **Install Core Stack** | Get Java & Keycloak running |
+| **[2](#phase-2--create-realm-client--user)**| **Core Configuration** | Setup Realms, Clients, Users |
+| **[3](#phase-3--configure-smtp)** | **SMTP Integration** | Enable email delivery capabilities |
+| **[4](#phase-4--enable-totp)** | **TOTP Config** | Enable App-based authentication |
+| **[5](#phase-5--deploy-email-otp-plugin)** | **Custom Plugin** | Add Email OTP functionality via SPI |
+| **[6](#phase-6--configure-authentication-flows)**| **Auth Flow Design**| Wire up the UI login workflow |
+| **[7](#phase-7--demo-application-setup)** | **Demo App Setup** | Connect a Node.js App to Keycloak |
+| **[8](#phase-8--testing-the-complete-flow)** | **Validation** | Verify the entire login process works |
+
+---
+## 📂 Quick Navigation
+- [Troubleshooting](#-troubleshooting)
+- [Keycloak Folder Structure](#-keycloak-folder-structure)
+---
+
+## Phase 1 — Install Java & Keycloak ☕
 
 ### 1.1 Install OpenJDK 21
-
-Keycloak 26.x requires Java 21. If you have an older version, install 21 alongside it:
+> **Requirement:** Keycloak 26.x strictly requires Java 21.
 
 ```bash
 sudo apt update
 sudo apt install -y openjdk-21-jdk
 ```
 
-If you have multiple Java versions, set 21 as default:
-
+**Optional:** If you have multiple Java versions, set `21` as default:
 ```bash
 sudo update-alternatives --config java
 # Select the java-21 option
 ```
 
-Verify:
-
+**Verify Installation:**
 ```bash
 java -version
-# Should show: openjdk version "21.x.x"
+# Expected Output: openjdk version "21.x.x"
 ```
 
-### 1.2 Download Keycloak
+### 1.2 Download & Install Keycloak
 
 ```bash
 export KC_VERSION=26.1.0
 cd ~
 wget "https://github.com/keycloak/keycloak/releases/download/${KC_VERSION}/keycloak-${KC_VERSION}.tar.gz"
-```
 
-### 1.3 Install Keycloak
-
-```bash
 tar -xzf keycloak-${KC_VERSION}.tar.gz
 sudo mv keycloak-${KC_VERSION} /opt/keycloak
 ```
 
-### 1.4 Configure Environment
+### 1.3 Configure Environment & Start Server
 
+Add paths to your `.bashrc`:
 ```bash
 echo 'export KEYCLOAK_HOME=/opt/keycloak' >> ~/.bashrc
 echo 'export PATH=$PATH:$KEYCLOAK_HOME/bin' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-### 1.5 Start Keycloak
-
+**Start Keycloak Development Server:**
 ```bash
 export KEYCLOAK_ADMIN=admin
 export KEYCLOAK_ADMIN_PASSWORD=admin123
 /opt/keycloak/bin/kc.sh start-dev --http-port=8082
 ```
+> ⚠️ **Note:** We use port `8082` to avoid conflicts with traditional `8080` services.
 
-> ⚠️ We use port **8082** because 8080 may be occupied by other services.
-
-### 1.6 Verify
-
-Open **http://localhost:8082/admin** in your browser and log in with `admin` / `admin123`.
+**✅ Validation:** Open [http://localhost:8082/admin](http://localhost:8082/admin) and log in with `admin` / `admin123`.
 
 ---
 
-## Phase 2 — Create Realm, Client & User
+## Phase 2 — Create Realm, Client & User 🏢
 
-### 2.1 Create Realm (GUI)
+We will establish our isolated environment (`local_demo`) here. 
 
-1. Open **http://localhost:8082/admin**
-2. Click the **dropdown in the top-left** (says "Keycloak" or "master")
-3. Click **Create Realm**
-4. **Realm name:** `local_demo`
-5. Click **Create**
+### 2.1 Realm & Client Setup (GUI)
 
-### 2.2 Create Client (GUI)
+> 💡 **Tip:** A Realm manages a set of users, credentials, roles, and groups.
 
-1. Make sure you're in the `local_demo` realm (top-left dropdown)
-2. Left sidebar → **Clients** → **Create client**
-3. **Client ID:** `demo-app` → Click **Next**
-4. **Client authentication:** `OFF` (public client) → Click **Next**
-5. Set:
-   - **Root URL:** `http://localhost:3000`
+1. In Admin Console, click the top-left dropdown (usually says `master`).
+2. Click **Create Realm**. Name it: `local_demo`.
+3. In the left panel, go to **Clients** → **Create client**.
+4. Configure Client:
+   - **Client ID:** `demo-app`
+   - **Client authentication:** `OFF` (Makes it a public client)
+   - **Root URL / Web Origins:** `http://localhost:3000`
    - **Valid redirect URIs:** `http://localhost:3000/*`
-   - **Web origins:** `http://localhost:3000`
-6. Click **Save**
+5. Click **Save**.
 
-### 2.3 Create Test User (GUI)
+### 2.2 User Registration
 
-1. Left sidebar → **Users** → **Add user**
-2. Fill in:
+1. Go to **Users** → **Add user**.
+2. Profile Settings:
    - **Username:** `testuser`
    - **Email:** `testuser@example.com`
-   - **Email verified:** toggle **ON**
-   - **First name:** `Test`, **Last name:** `User`
-3. Click **Create**
-4. Go to **Credentials** tab → **Set password**
+   - **Email verified:** Toggle **ON**
+3. Save, then navigate to the **Credentials** tab.
+4. Click **Set password**:
    - **Password:** `test123`
-   - **Temporary:** toggle **OFF**
-   - Click **Save** → **Confirm**
-
-### Alternative: Create via CLI
-
-```bash
-# Authenticate CLI
-/opt/keycloak/bin/kcadm.sh config credentials \
-  --server http://localhost:8082 \
-  --realm master \
-  --user admin \
-  --password admin123
-
-# Create realm
-/opt/keycloak/bin/kcadm.sh create realms \
-  -s realm=local_demo \
-  -s enabled=true
-
-# Create client
-/opt/keycloak/bin/kcadm.sh create clients \
-  -r local_demo \
-  -s clientId=demo-app \
-  -s enabled=true \
-  -s publicClient=true \
-  -s 'redirectUris=["http://localhost:3000/*"]' \
-  -s 'webOrigins=["http://localhost:3000"]' \
-  -s standardFlowEnabled=true \
-  -s directAccessGrantsEnabled=true
-
-# Create user
-/opt/keycloak/bin/kcadm.sh create users \
-  -r local_demo \
-  -s username=testuser \
-  -s enabled=true \
-  -s emailVerified=true \
-  -s 'email=testuser@example.com' \
-  -s firstName=Test \
-  -s lastName=User
-
-# Set password
-/opt/keycloak/bin/kcadm.sh set-password \
-  -r local_demo \
-  --username testuser \
-  --new-password test123
-```
+   - **Temporary:** Toggle **OFF**
+5. Save & Confirm.
 
 ---
 
-## Phase 3 — Configure SMTP
+## Phase 3 — Configure SMTP 📧
 
-SMTP is required for Email OTP. We use **Mailtrap** for sandbox testing.
+Required for sending Email OTPs. We use [Mailtrap](https://mailtrap.io/) for sandbox testing.
 
-1. In Keycloak admin → `local_demo` realm → **Realm settings** → **Email** tab
-2. Configure:
+### Setup (Admin Console)
+1. Navigate to **Realm settings** → **Email** tab (in `local_demo`).
+2. Fill the configuration:
 
-| Field | Value |
-|---|---|
+| Setting Field | Configuration Value |
+| :--- | :--- |
 | **From** | `keycloak@localdemo.com` |
-| **From display name** | `Keycloak Local` |
 | **Host** | `sandbox.smtp.mailtrap.io` |
 | **Port** | `587` |
-| **Enable StartTLS** | `ON` |
-| **Enable SSL** | `OFF` |
-| **Authentication** | `ON` |
-| **Username** | `<your-mailtrap-username>` |
-| **Password** | `<your-mailtrap-password>` |
+| **Enable StartTLS / Auth** | `ON` |
+| **Username/Password** | `<your-mailtrap-credentials>` |
 
-3. Before testing: add email to admin user:
-   - Switch to **master** realm → **Users** → click **admin**
-   - Set **Email:** `admin@localdemo.com` → **Save**
-   - Switch back to `local_demo` realm
-4. Click **Test connection** → should say "Email sent successfully"
-5. Click **Save**
+> 🚨 **Prerequisite before testing:** You must add an email address to the `admin` user in the `master` realm before clicking "Test Connection".
 
 ---
 
-## Phase 4 — Enable TOTP
+## Phase 4 — Enable TOTP 📱
 
-### 4.1 Configure OTP Policy
-
-1. In `local_demo` realm → **Authentication** → **Policies** tab → **OTP Policy**
-2. Set:
+### 4.1 Global Policy Setup
+1. Go to **Authentication** → **Policies** tab → **OTP Policy**.
+2. Configure attributes:
    - **OTP Type:** `totp`
-   - **Number of Digits:** `6`
-   - **Look Ahead Window:** `1`
-   - **OTP Token Period:** `30`
-3. Click **Save**
+   - **Digits:** `6` 
+   - **Period:** `30` (seconds)
 
-### 4.2 Enable Required Action
-
-1. **Authentication** → **Required Actions** tab
-2. Find **Configure OTP** → ensure it's **enabled** (toggle ON)
-
-### 4.3 Force TOTP for a User
-
-1. **Users** → click on a user → **Required user actions** → select **Configure OTP**
-2. Click **Save**
-3. Next login, the user will be prompted to set up TOTP via QR code scan
+### 4.2 Enforce for Users
+- **Enable the Action:** In **Authentication** → **Required Actions**, ensure `Configure OTP` is toggled ON.
+- **Apply to User:** Go to **Users** → `testuser` → **Required user actions**, select `Configure OTP`, and Save.
 
 ---
 
-## Phase 5 — Deploy Email OTP Plugin
+## Phase 5 — Deploy Email OTP Plugin 🧩
 
-We use the [5-stones/keycloak-email-otp](https://github.com/5-stones/keycloak-email-otp) plugin.
+We compile a custom SPI (Service Provider Interface) to handle Email-based codes.
 
-### 5.1 Clone & Build
-
+### 5.1 Build the Plugin
 ```bash
 cd ~
 git clone https://github.com/5-stones/keycloak-email-otp.git
 cd keycloak-email-otp
 
-# Update Keycloak version to match yours
+# Ensure compatibility with KC26
 sed -i 's/22.0.5/26.1.0/' pom.xml
-
-# Build
 mvn clean install
 ```
 
-### 5.2 Deploy
-
+### 5.2 Deploy & Reload
 ```bash
-# Copy JAR to Keycloak providers
 sudo cp target/*.jar /opt/keycloak/providers/
+sudo rm -f /opt/keycloak/providers/original-*.jar  # Clean up old artifacts
 
-# Remove duplicate JAR if present
-sudo rm -f /opt/keycloak/providers/original-*.jar
-```
-
-### 5.3 Rebuild & Restart Keycloak
-
-```bash
-# Stop Keycloak (Ctrl+C in the Keycloak terminal)
-
-# Rebuild
+# Restart Keycloak Process
 /opt/keycloak/bin/kc.sh build
-
-# Start
-export KEYCLOAK_ADMIN=admin
-export KEYCLOAK_ADMIN_PASSWORD=admin123
 /opt/keycloak/bin/kc.sh start-dev --http-port=8082
 ```
 
-### 5.4 Verify
+---
 
-In Keycloak admin → **Authentication** → **Flows** → any flow → **Add step** → search for `Email TOTP`. You should see **"Email TOTP Authentication"** in the list.
+## Phase 6 — Configure Authentication Flows 🔄
+
+This defines the exact sequence a user experiences during login.
+
+**Goal:** Require both Username/Password AND an Email OTP.
+
+### Configuration Steps
+1. Navigate to **Authentication** → **Flows** → **Create flow** (Name: `email-otp-flow`).
+2. Replicate this exact visual structure using the **Add Step** and **Add sub-flow** buttons:
+
+```text
+⚙️ email-otp-flow
+└── 🍪 Cookie                          [ALTERNATIVE]
+└── 📁 login-forms (sub-flow)          [ALTERNATIVE]
+    ├── 👤 Username Password Form      [REQUIRED]
+    └── ✉️ Email TOTP Authentication   [REQUIRED]
+```
+
+### Final Polish
+1. On the `Email TOTP Authentication` step, click the **⚙️ Gear Icon**.
+   - Input `Alias:` `email-otp` (Crucial for operation)
+   - Toggle `Simulation Mode:` `OFF`
+2. **Bind the Flow:** Click the **⋮ (three dots)** next to `email-otp-flow` title → **Bind flow** → select **Browser flow**.
 
 ---
 
-## Phase 6 — Configure Authentication Flows
+## Phase 7 — Demo Application Setup 💻
 
-### 6.1 Create the Email OTP Flow
+Establish a Node.js server acting as the Relying Party.
 
-1. **Authentication** → **Flows** → **Create flow**
-   - Name: `email-otp-flow`
-   - Click **Create**
-
-2. Add steps:
-
-```
-email-otp-flow
-├── Cookie                          → ALTERNATIVE
-├── login-forms (sub-flow)          → ALTERNATIVE
-│   ├── Username Password Form      → REQUIRED
-│   └── Email TOTP Authentication   → REQUIRED
-```
-
-Step by step:
-- Click **Add step** → `Cookie` → Add → set **ALTERNATIVE**
-- Click **Add sub-flow** → Name: `login-forms` → Add → set **ALTERNATIVE**
-- Expand `login-forms`:
-  - **Add step** → `Username Password Form` → Add → **REQUIRED**
-  - **Add step** → `Email TOTP Authentication` → Add → **REQUIRED**
-
-3. Configure Email TOTP: click the **⚙️ gear icon** next to it:
-   - **Alias:** `email-otp`
-   - **Simulation mode:** `OFF`
-   - **Code length:** `6`
-   - **Time-to-live:** `300`
-   - Click **Save**
-
-### 6.2 Bind the Flow
-
-1. Click **⋮** (three dots) next to `email-otp-flow`
-2. **Bind flow** → **Browser flow** → **Save**
-
-### 6.3 Flow with TOTP (Alternative)
-
-To let users use either TOTP or Email OTP, create a flow like:
-
-```
-mfa-flow
-├── Cookie                              → ALTERNATIVE
-├── mfa-forms (sub-flow)                → ALTERNATIVE
-│   ├── Username Password Form          → REQUIRED
-│   ├── mfa-options (sub-flow)          → REQUIRED
-│   │   ├── OTP Form                    → ALTERNATIVE
-│   │   └── Email TOTP Authentication   → ALTERNATIVE
-```
-
-This way, if the user has TOTP configured, they use the OTP Form. If not, they get the Email OTP.
-
----
-
-## Phase 7 — Demo Application Setup
-
-### 7.1 Create the App
-
+### 7.1 Setup Project
 ```bash
 mkdir -p ~/demo-app && cd ~/demo-app
-```
-
-### 7.2 Create `package.json`
-
-```json
-{
-  "name": "keycloak-demo-app",
-  "version": "1.0.0",
-  "description": "Keycloak OIDC demo app with landing page",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "express-session": "^1.17.3",
-    "openid-client": "^5.7.0"
-  }
-}
-```
-
-### 7.3 Create `index.js`
-
-See the `demo-app/index.js` file in this repository. Key configuration:
-
-```javascript
-const KEYCLOAK_URL = 'http://localhost:8082';
-const REALM = 'local_demo';
-const CLIENT_ID = 'demo-app';
-const REDIRECT_URI = 'http://localhost:3000/callback';
-```
-
-> **Important:** The `token_endpoint_auth_method` must be set to `'none'` since `demo-app` is a public client.
-
-### 7.4 Install & Run
-
-```bash
-cd ~/demo-app
+# Ensure you copy package.json and index.js into this folder
 npm install
 node index.js
-# App runs at http://localhost:3000
 ```
+
+> **Note:** Application runs successfully bridging `localhost:3000` to Keycloak's `localhost:8082`.
 
 ---
 
-## Phase 8 — Testing the Complete Flow
+## Phase 8 — Testing the Complete Flow 🧪
 
-### 8.1 Test Email OTP
-
-1. Open **http://localhost:3000** in an **Incognito/Private window**
-2. Click **Login with Keycloak**
-3. Enter `testuser` / `test123`
-4. You should see the Email OTP form
-5. Check your **Mailtrap inbox** (https://mailtrap.io) for the code
-6. Enter the code → **Welcome, testuser!** 🎉
-
-### 8.2 Test TOTP
-
-1. In Keycloak admin → **Users** → `testuser` → **Required user actions** → add **Configure OTP**
-2. Login again → you'll be prompted to scan a QR code with Google Authenticator
-3. Enter the 6-digit code from the authenticator app → **Welcome, testuser!** 🎉
-
-### 8.3 Test Logout
-
-1. Click the **Logout** button on the Welcome page
-2. You should be redirected back to the login page
+1. **Clean Slate:** Open an **Incognito/Private** browser window to avoid lingering sessions.
+2. **Access App:** Go to `http://localhost:3000` → click **"Login with Keycloak"**.
+3. **Step 1 Auth:** Enter `testuser` / `test123`.
+4. **Step 2 Auth (MFA):** The Email OTP prompt appears. 
+5. **Verify:** Check your Mailtrap dashboard, retrieve the 6-digit code, enter it.
+6. **Success!** You land on the authenticated App dashboard.
 
 ---
 
-## Troubleshooting
+## 🛠 Troubleshooting
 
-### Common Issues
-
-| Issue | Solution |
-|---|---|
-| **Port 8080 in use** | Use `--http-port=8082` when starting Keycloak |
-| **"Realm does not exist"** | Check realm name in Keycloak admin matches `local_demo` |
-| **"client_secret_basic requires a client_secret"** | Set `token_endpoint_auth_method: 'none'` in index.js AND ensure Client authentication is OFF in Keycloak |
-| **"Connection security" warning** | Normal for HTTP — safe on localhost, just proceed |
-| **Node.js "Unexpected token '.'"** | Upgrade Node.js to v14+ (`curl -fsSL https://deb.nodesource.com/setup_20.x \| sudo -E bash - && sudo apt install -y nodejs`) |
-| **Email send failed** | Verify SMTP settings in Realm settings → Email tab, and configure Email TOTP alias |
-| **TOTP not showing** | Add "Configure OTP" to user's Required user actions |
-| **Login skips MFA** | Clear cookies / use Incognito. Check the auth flow is bound as Browser flow |
-
-### Useful Commands
-
-```bash
-# Start Keycloak with debug logging
-/opt/keycloak/bin/kc.sh start-dev --http-port=8082 \
-  --log-level=org.keycloak.authentication:DEBUG
-
-# Check Java version
-java -version
-
-# Check Keycloak providers
-ls /opt/keycloak/providers/
-
-# Keycloak admin CLI auth
-/opt/keycloak/bin/kcadm.sh config credentials \
-  --server http://localhost:8082 \
-  --realm master \
-  --user admin \
-  --password admin123
-```
+| Symptom | Diagnosis & Fix |
+| :--- | :--- |
+| **Port 8080 conflicts** | Ensure you append `--http-port=8082` to start command |
+| **"Realm does not exist"** | Ensure variable/code references `local_demo`, not `local-demo` |
+| **"Requires client_secret"** | Set `token_endpoint_auth_method: 'none'` in App code AND verify Client Authentication is OFF in KC |
+| **Mail Sending Failed** | Did you add an `email-otp` alias in the flow configuration gear options? |
+| **Directly logged in (No MFA)** | An old session cookie exists. Use Incognito Mode. |
 
 ---
 
-## Keycloak Folder Structure
+## 📂 Keycloak Folder Structure
 
-```
+Understanding the underlying `/opt/keycloak` architecture:
+
+```text
 /opt/keycloak/
-├── bin/                    # Scripts (kc.sh, kcadm.sh)
-│   ├── kc.sh               # Main startup script
-│   └── kcadm.sh            # Admin CLI tool
-├── conf/                   # Configuration files
-│   ├── keycloak.conf        # Main config (ports, DB, hostname)
-│   └── cache-ispn.xml       # Infinispan cache config
-├── data/                   # Runtime data (H2 database in dev mode)
-│   └── h2/                  # H2 database files
-├── lib/                    # Core libraries
-├── providers/              # Custom SPI JARs go here
-│   └── *.jar                # Email OTP plugin JAR
-├── themes/                 # UI themes (login, account, admin)
-│   ├── base/                # Base theme
-│   └── keycloak/            # Default theme
-└── version.txt             # Keycloak version info
+├── 📄 version.txt             # Keycloak version info
+├── ⚙️ conf/                   # Configuration files (keycloak.conf)
+├── 🗄️ data/                   # Runtime data (H2 DB stored here in dev)
+├── 🎨 themes/                 # UI themes to customize login screens
+├── 🧩 providers/              # Location for custom SPI JARs (.jar files go here!)
+└── 🛠️ bin/                    # Executables
+    ├── kc.sh                  # Main start script
+    └── kcadm.sh               # CLI Admin tool 
 ```
-
----
-
-## Quick Reference
-
-| Resource | URL |
-|---|---|
-| Keycloak Admin Console | http://localhost:8082/admin |
-| Demo App | http://localhost:3000 |
-| Keycloak Account Console | http://localhost:8082/realms/local_demo/account |
-| OIDC Discovery | http://localhost:8082/realms/local_demo/.well-known/openid-configuration |
-| Mailtrap Inbox | https://mailtrap.io |
