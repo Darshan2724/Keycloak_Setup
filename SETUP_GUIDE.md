@@ -20,8 +20,99 @@
 
 ---
 ## 📂 Quick Navigation
+- [Architecture & Workflows](#-architecture--workflows)
 - [Troubleshooting](#-troubleshooting)
 - [Keycloak Folder Structure](#-keycloak-folder-structure)
+---
+
+## 🏗️ Architecture & Workflows
+
+### 1. System Architecture Diagram
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant DemoApp as Node.js Demo App
+    participant Keycloak
+    participant SMTP as Mailtrap (SMTP)
+    participant AuthApp as Authenticator App
+
+    User->>DemoApp: Click "Login with Keycloak"
+    DemoApp->>Keycloak: OIDC Auth Request (PKCE)
+    Keycloak->>User: Display Login Page
+    User->>Keycloak: Submit Username & Password
+    
+    rect rgb(30, 30, 30)
+        Note over Keycloak,SMTP: Factor 1: Password Check
+        Keycloak-->>Keycloak: Validate Credentials
+    end
+    
+    alt MFA: Email OTP
+        Keycloak->>SMTP: Send OTP via Email
+        SMTP->>User: Deliver 6-digit Email
+        Keycloak->>User: Display Email OTP Page
+        User->>Keycloak: Submit 6-digit Code
+        Keycloak-->>Keycloak: Validate Code
+    else MFA: TOTP
+        Keycloak->>User: Display TOTP Page
+        AuthApp->>User: Check Authenticator App
+        User->>Keycloak: Submit 6-digit Code
+        Keycloak-->>Keycloak: Validate Code
+    end
+    
+    Keycloak->>DemoApp: OIDC Callback with Code
+    DemoApp->>Keycloak: Exchange Code for Tokens
+    Keycloak-->>DemoApp: ID Token & Access Token
+    DemoApp-->>User: Display Welcome Page
+```
+
+### 2. MFA Orchestration Flow
+
+The authentication logic is defined visually within Keycloak's flow configurations.
+
+```mermaid
+stateDiagram-v2
+    [*] --> User_Auth_Initiated
+    
+    state MFA_Flow {
+        User_Auth_Initiated --> Username_Password_Form
+        
+        Username_Password_Form --> Check_Credentials: Submit Data
+        
+        state Check_Credentials {
+            [*] --> Validate_DB
+            Validate_DB --> Invalid_Password: Fail
+            Validate_DB --> Valid_Password: Success
+        }
+        
+        Invalid_Password --> Password_Fail
+        
+        Valid_Password --> MFA_Options_Flow
+        
+        state MFA_Options_Flow {
+            [*] --> Check_MFA_Requirement
+            Check_MFA_Requirement --> Email_OTP_Action: Required
+            
+            state Email_OTP_Action {
+                [*] --> Send_Email
+                Send_Email --> Wait_for_Input
+                Wait_for_Input --> Validate_OTP_Code: Submit Code
+                
+                Validate_OTP_Code --> Invalid_Code: Fail
+                Validate_OTP_Code --> Valid_Code: Success
+            }
+            
+            Invalid_Code --> MFA_Fail
+            Valid_Code --> MFA_Success
+        }
+    }
+    
+    Password_Fail --> [*]: Deny Access
+    MFA_Fail --> [*]: Deny Access
+    MFA_Success --> Grant_Access
+    Grant_Access --> [*]
+```
+
 ---
 
 ## Phase 1 — Install Java & Keycloak ☕
